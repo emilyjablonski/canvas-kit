@@ -1,14 +1,18 @@
 import * as React from 'react';
 import styled from '@emotion/styled';
-import {colors, type} from '@workday/canvas-kit-react-core';
-import {chevronRightSmallIcon, relatedActionsIcon} from '@workday/canvas-system-icons-web';
+import {colors} from '@workday/canvas-kit-react-core';
+import {chevronRightSmallIcon, folderCloseIcon} from '@workday/canvas-system-icons-web';
 import {DropdownPopover, dummyOption, OptionProps} from './DropdownPopover';
 import {SystemIcon} from '@workday/canvas-kit-react-icon';
 import {IconButton} from '@workday/canvas-kit-react-button';
 
-export type BreadcrumbVariation = `large` | `medium`;
+// local components
+import {BreadcrumbsList} from './Breadcrumbs/List';
+import {CurrentCrumb} from './Breadcrumbs/CurrentCrumb';
+import {LinkedCrumb, LinkedCrumbProps} from './Breadcrumbs/LinkedCrumb';
+import {BreadcrumbsNav} from './Breadcrumbs/Nav';
 
-export type Breadcrumb = {
+export interface Breadcrumb extends LinkedCrumbProps {
   /**
    * The text displayed for the Breadcrumb.
    */
@@ -17,7 +21,7 @@ export type Breadcrumb = {
    * The function called when the Breadcrumb is interacted with.
    */
   onAction: () => void;
-};
+}
 
 export interface BreadcrumbsProps extends React.HTMLAttributes<HTMLDivElement> {
   /**
@@ -28,29 +32,9 @@ export interface BreadcrumbsProps extends React.HTMLAttributes<HTMLDivElement> {
    * The width of the breadcrumbs container, used to determine which breadcrumbs to hide.
    */
   containerWidth: number;
-  /**
-   * The size variation of the breadcrumbs.
-   */
-  variation?: BreadcrumbVariation;
 }
 
-type CrumbProps = {
-  variation: BreadcrumbVariation;
-};
-
-const LinkedCrumb = styled.span((props: CrumbProps) => ({
-  ...type.body,
-  ...type.variant.link,
-  fontSize: props.variation === `large` ? `16px` : `14px`,
-}));
-
-const CurrentCrumb = styled.span((props: CrumbProps) => ({
-  ...type.body,
-  ...type.variant.label,
-  fontSize: props.variation === `large` ? `16px` : `14px`,
-}));
-
-const BreadcrumbsContainer = styled.div({
+const BreadcrumbsItem = styled.li({
   display: `flex`,
   alignItems: `center`,
 });
@@ -63,11 +47,9 @@ export const Breadcrumbs = (props: BreadcrumbsProps) => {
   const [expanderOpen, setExpanderOpen] = React.useState<boolean>(false);
   const [breadcrumbsHidden, setBreadcrumbsHidden] = React.useState<number[]>([]);
   const [activeOption, setActiveOption] = React.useState(dummyOption);
-  const expanderRef: React.RefObject<HTMLButtonElement> = React.useRef(null);
-  const activeOptionEl: React.RefObject<HTMLDivElement> = React.useRef(null);
-  const dividerWidth = 42;
-  const breadcrumbsWidths: number[] = [];
-  let context: CanvasRenderingContext2D | null | undefined;
+  const expanderRef = React.useRef<HTMLButtonElement>(null);
+  const activeOptionEl = React.useRef<HTMLDivElement>(null);
+  const listRef = React.useRef<HTMLOListElement>(null);
 
   React.useLayoutEffect(() => {
     if (activeOptionEl.current) {
@@ -76,41 +58,27 @@ export const Breadcrumbs = (props: BreadcrumbsProps) => {
   });
 
   React.useLayoutEffect(() => {
-    if (context) {
-      context.font.fontsize(props.variation === `large` ? 16 : 14);
-    }
+    const breadcrumbsListWidth = listRef.current?.clientWidth || 0;
 
-    // Store widths of each breadcrumb and calculate total breadcrumb width
-    let widthOfBreadcrumbNames = 0;
-    props.breadcrumbs.forEach(breadcrumb => {
-      const width = context ? context.measureText(breadcrumb.name).width : 0;
-      breadcrumbsWidths.push(width ? width : 0);
-      if (width) {
-        widthOfBreadcrumbNames += width;
-      }
-    });
+    const listItems = listRef.current ? listRef.current.querySelectorAll('li') : [];
+    const breadcrumbWidths = Array.from(listItems).map(li => li.clientWidth);
 
     // If too wide for container, hide breadcrumbs starting after root
-    let totalWidth = widthOfBreadcrumbNames + dividerWidth * (props.breadcrumbs.length - 1);
-    if (totalWidth > props.containerWidth) {
-      const newHidden = [...breadcrumbsHidden];
-      for (let i = 1; i < props.breadcrumbs.length; i++) {
-        if (breadcrumbsHidden.indexOf(i) === -1) {
-          newHidden.push(i);
-        }
-        totalWidth = totalWidth - breadcrumbsWidths[i] - dividerWidth;
-        if (totalWidth <= props.containerWidth) {
+    if (breadcrumbsListWidth > props.containerWidth) {
+      const hiddenItems = [...breadcrumbsHidden];
+      let adjustedWidth = breadcrumbsListWidth;
+      for (let i = 1; i < breadcrumbWidths.length - 1; i++) {
+        hiddenItems.push(i);
+        adjustedWidth = adjustedWidth - breadcrumbWidths[i];
+        if (adjustedWidth <= props.containerWidth) {
           break;
         }
       }
-      setBreadcrumbsHidden(newHidden);
-    } else {
-      // The container width is large enough to show all breadcrumbs
-      setBreadcrumbsHidden([]);
+      return setBreadcrumbsHidden(hiddenItems);
     }
-
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.breadcrumbs, props.containerWidth]);
+    // The container width is large enough to show all breadcrumbs
+    return setBreadcrumbsHidden([]);
+  }, []);
 
   let expanderRendered = false;
 
@@ -170,85 +138,80 @@ export const Breadcrumbs = (props: BreadcrumbsProps) => {
   };
 
   return (
-    <BreadcrumbsContainer role={`navigation`}>
-      <canvas
-        ref={c => {
-          if (c) {
-            context = c.getContext(`2d`);
-          }
-        }}
-        width={0}
-        height={0}
-      />
-      {props.breadcrumbs.map((breadcrumb, index) => {
-        if (breadcrumbsHidden.indexOf(index) === -1) {
-          if (index < props.breadcrumbs.length - 1) {
+    <BreadcrumbsNav>
+      <BreadcrumbsList ref={listRef}>
+        {props.breadcrumbs.map(({name, onAction, ...breadcrumbProps}, index) => {
+          // if the breadcrumb is visible
+          if (breadcrumbsHidden.indexOf(index) === -1) {
+            if (index < props.breadcrumbs.length - 1) {
+              return (
+                <BreadcrumbsItem key={index}>
+                  <LinkedCrumb
+                    onClick={onAction}
+                    tabIndex={0}
+                    onKeyDown={e => onLinkedCrumbKeyPress(e, onAction)}
+                    {...breadcrumbProps}
+                  >
+                    {name}
+                  </LinkedCrumb>
+                  <SystemIcon
+                    icon={chevronRightSmallIcon}
+                    color={colors.licorice200}
+                    colorHover={colors.licorice200}
+                    aria-hidden
+                  />
+                </BreadcrumbsItem>
+              );
+            } else {
+              return (
+                <CurrentCrumb key={index} title="Breadcrumb">
+                  {name}
+                </CurrentCrumb>
+              );
+            }
+          } else if (!expanderRendered && breadcrumbsHidden.length > 0) {
+            expanderRendered = true;
             return (
-              <BreadcrumbsContainer key={index}>
-                <LinkedCrumb
-                  title="Breadcrumb"
-                  variation={props.variation || `medium`}
-                  onClick={breadcrumb.onAction}
-                  tabIndex={0}
-                  onKeyDown={e => onLinkedCrumbKeyPress(e, breadcrumb.onAction)}
-                >
-                  {breadcrumb.name}
-                </LinkedCrumb>
-                <SystemIcon
-                  icon={chevronRightSmallIcon}
+              <BreadcrumbsItem key={index}>
+                <IconButton
+                  style={{margin: '0 2px'}}
+                  variant={IconButton.Variant.Plain}
+                  icon={folderCloseIcon}
                   color={colors.licorice200}
-                  colorHover={colors.licorice200}
-                  aria-hidden={true}
+                  buttonRef={expanderRef}
+                  toggled={expanderOpen}
+                  onClick={() => {
+                    if (activeOption !== dropdownOptions[0][0]) {
+                      setExpanderOpen(!expanderOpen);
+                    }
+                  }}
+                  onKeyUp={e => {
+                    handleExpanderKeyPress(
+                      e,
+                      setExpanderOpen,
+                      setActiveOption,
+                      dropdownOptions[0][0]
+                    );
+                  }}
+                  data-testid={`more-breadcrumbs`}
+                  aria-label={`more-breadcrumbs`}
                 />
-              </BreadcrumbsContainer>
-            );
-          } else {
-            return (
-              <CurrentCrumb key={index} variation={props.variation || `medium`} title="Breadcrumb">
-                {breadcrumb.name}
-              </CurrentCrumb>
+                {breadcrumbsHidden.indexOf(props.breadcrumbs.length - 1) === -1 && (
+                  <SystemIcon
+                    icon={chevronRightSmallIcon}
+                    color={colors.licorice200}
+                    colorHover={colors.licorice200}
+                    aria-hidden
+                  />
+                )}
+              </BreadcrumbsItem>
             );
           }
-        } else if (!expanderRendered && breadcrumbsHidden.length > 0) {
-          expanderRendered = true;
-          return (
-            <BreadcrumbsContainer key={index}>
-              <IconButton
-                icon={relatedActionsIcon}
-                color={colors.licorice200}
-                buttonRef={expanderRef}
-                toggled={expanderOpen}
-                onClick={() => {
-                  if (activeOption !== dropdownOptions[0][0]) {
-                    setExpanderOpen(!expanderOpen);
-                  }
-                }}
-                onKeyUp={e => {
-                  handleExpanderKeyPress(
-                    e,
-                    setExpanderOpen,
-                    setActiveOption,
-                    dropdownOptions[0][0]
-                  );
-                }}
-                data-testid={`more-breadcrumbs`}
-                aria-label={`more-breadcrumbs`}
-              />
-              {breadcrumbsHidden.indexOf(props.breadcrumbs.length - 1) === -1 && (
-                <SystemIcon
-                  icon={chevronRightSmallIcon}
-                  color={colors.licorice200}
-                  colorHover={colors.licorice200}
-                  aria-hidden={true}
-                />
-              )}
-            </BreadcrumbsContainer>
-          );
-        }
-        return <div key={index}></div>;
-      })}
+          return <div key={index}></div>;
+        })}
+      </BreadcrumbsList>
       {expanderOpen && getExpanderDropdown()}
-    </BreadcrumbsContainer>
+    </BreadcrumbsNav>
   );
 };
 
